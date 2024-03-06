@@ -1,0 +1,78 @@
+[tool.poetry]
+name = "kasyore"
+version = "0.1.0"
+description = ""
+authors = ["kush <kouta528bado@yahoo.co.jp>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9,<4.0"
+fastapi = "^0.103.2"
+more-itertools = "^10.1.0"
+numpy = "1.24.4"
+transformers = { version = "^4.34.1", extras = ["encoder"] }
+elasticsearch = {extras = ["async"], version = "^8.11.0"}
+torch = { version = "^2.1.1", extras = ["encoder"] }
+uvicorn = "^0.24.0.post1"
+aiohttp = "^3.9.1"
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.9.1"
+isort = "^5.12.0"
+flake8-docstrings = "^1.7.0"
+mypy = "^1.5.1"
+pytest = "^7.4.2"
+pytest-cov = "^4.1.0"
+tox = "^4.11.3"
+toml = "^0.10.2"
+bump2version = "^1.0.1"
+click = "^8.1.7"
+ruff = "^0.0.292"
+
+[tool.poetry.group.docs.dependencies]
+mkdocs = "^1.5.3"
+mkdocs-include-markdown-plugin = "^1.0.0"
+mkdocs-material = "^9.4.3"
+mkdocs-material-extensions = "^1.2"
+mkdocs-autorefs = "^0.5.0"
+mkdocstrings = { version = "^0.23.0", extras = ["python"] }
+mkdocs-macros-plugin = "^1.0.4"
+
+
+[tool.poetry.group.collector.dependencies]
+piyo = "^1.1.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 86
+skip-string-normalization = true
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+line_length = 86
+skip_gitignore = true
+
+[tool.ruff]
+ignore = ["F841", "F401"]

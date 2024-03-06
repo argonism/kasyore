@@ -1,0 +1,10 @@
+ARG ELASTIC_VERSION
+
+FROM docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION}
+ARG ELASTIC_VERSION
+RUN elasticsearch-plugin install https://github.com/WorksApplications/elasticsearch-sudachi/releases/download/v3.1.0/elasticsearch-${ELASTIC_VERSION}-analysis-sudachi-3.1.0.zip
+RUN curl -Lo sudachi-dictionary-latest-core.zip http://sudachi.s3-website-ap-northeast-1.amazonaws.com/sudachidict/sudachi-dictionary-latest-core.zip && \
+    mkdir -p /usr/share/elasticsearch/config/sudachi && \
+    unzip sudachi-dictionary-latest-core.zip -d /usr/share/elasticsearch/config/sudachi && \
+    mv /usr/share/elasticsearch/config/sudachi/*/*.dic /usr/share/elasticsearch/config/sudachi/ && \
+    rm sudachi-dictionary-latest-core.zip

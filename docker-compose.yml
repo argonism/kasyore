@@ -1,0 +1,80 @@
+version: "3"
+
+services:
+  kasyore-backend:
+    build:
+      context: .
+      dockerfile: src/backend/Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    working_dir: /usr/kasyore
+    tty: true
+    ports:
+      - 9999:9999
+    volumes:
+      - ./:/usr/kasyore
+    entrypoint: python main.py
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST}
+      - ELASTICSEARCH_PORT=${ELASTICSEARCH_PORT}
+
+  elasticsearch:
+    build:
+      context: .
+      dockerfile: vector_indexer/elasticsearch/Dockerfile.jp
+      args:
+        - ELASTIC_VERSION=${ELASTIC_VERSION}
+    environment:
+      - node.name=elasticsearch
+      - cluster.name=es-docker-cluster
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - es1vol:/usr/share/elasticsearch
+    ports:
+      - 9200:9200
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sk http://localhost:9200/ | grep -q 'You Know, for Search'",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  kasyore-frontend:
+    build:
+      context: src/frontend/svelte
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - BACKEND_URL=http://kasyore-backend:9999/search
+      - PORT=5173
+    ports:
+      - 5173:5173
+
+  tunnel:
+    restart: always
+    image: cloudflare/cloudflared
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=eyJhIjoiMTJhMDg2MzIzNjRiZGM5MzAyOTkwZWFkMTM5YjVjMWUiLCJ0IjoiNTAwNTI4ZWUtNGNiMC00YmRiLWI5MmEtN2NkODllMGI3NmYyIiwicyI6Ik9EUTFabVExTkRrdFpUaG1NeTAwWVRFMExXSTBObUV0WVRreFlUWTVNR00xWWpRMyJ9
+
+
+volumes:
+  es1vol:
+    driver: local
