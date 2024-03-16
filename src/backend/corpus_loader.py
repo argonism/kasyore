@@ -4,7 +4,8 @@ from typing import Dict, Iterator, List, Optional
 
 import psycopg2
 from more_itertools import chunked
-from psycopg2.extras import DictCursor
+from psycopg2.extras import RealDictCursor
+from psycopg2.sql import SQL, Identifier
 from pydantic import BaseModel
 from tqdm import tqdm
 
@@ -93,15 +94,18 @@ class PostgresCorpusLoader(CorpusLoader):
 
     def _transform_row(self, row: Dict[str, str]) -> Dict[str, str]:
         mapper = self.table_map.mapper
-        for k, v in mapper:
+        for k, v in mapper.items():
             if k in row:
-                v[v] = row[k].pop()
+                row[v] = row.pop(k)
         return row
 
     def fetch(self):
-        with self.connection.cursor(cursor_factory=DictCursor) as cur:
-            cur.execute("SELECT * FROM %s", (self.table_map.table_name,))
+        with self.connection.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                SQL("SELECT * FROM {}").format(Identifier(self.table_map.table_name))
+            )
             for row in cur:
+                row = dict(row)
                 transformed = self._transform_row(row)
                 record = dict(zip(self.table_map.mapper.keys(), row))
                 yield row
