@@ -2,7 +2,9 @@ import abc
 import json
 from typing import Dict, Iterator, List, Optional
 
+import psycopg2
 from more_itertools import chunked
+from psycopg2.extras import DictCursor
 from pydantic import BaseModel
 from tqdm import tqdm
 
@@ -67,3 +69,47 @@ class AdhocCorpusLoader(CorpusLoader):
     def load(self, batch_size: int = 10_000) -> Iterator[List[BaseModel]]:
         for chunk in chunked(self.docs, batch_size):
             yield self.dict_to_doc(chunk)
+
+
+class TableMapper(BaseModel):
+    table_name: str
+    mapper: Dict[str, str]
+
+
+class PostgresCorpusLoader(CorpusLoader):
+    def __init__(
+        self,
+        table_map: TableMapper,
+        host: str,
+        password: str = "",
+        port: int = 5432,
+        user: str = "postgres",
+        dbname: str = "kasyore",
+    ) -> None:
+        self.table_map = table_map
+        self.connection = psycopg2.connect(
+            user=user, host=host, password=password, port=port
+        )
+
+    def _transform_row(self, row: Dict[str, str]) -> Dict[str, str]:
+        mapper = self.table_map.mapper
+        for k, v in mapper:
+            if k in row:
+                v[v] = row[k].pop()
+        return row
+
+    def fetch(self):
+        with self.connection.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("SELECT * FROM %s", (self.table_map.table_name,))
+            for row in cur:
+                transformed = self._transform_row(row)
+                record = dict(zip(self.table_map.mapper.keys(), row))
+                yield row
+
+    def __del__(self):
+        self.connection.close()
+
+    def load(self, batch_size: int = 10_000) -> Iterator[List[BaseModel]]:
+        iterator = chunked(self.fetch(), batch_size)
+        for chunk in iterator:
+            yield chunk

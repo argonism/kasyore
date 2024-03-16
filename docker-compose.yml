@@ -67,6 +67,44 @@ services:
     ports:
       - 5173:5173
 
+  db:
+    image: postgres:16.2-alpine3.19
+    ports:
+      - 5432:5432
+    volumes:
+      - db-store:/var/lib/postgresql/data
+      - ./src/database:/docker-entrypoint-initdb.d
+    environment:
+      - LANG=ja_JP.utf8
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  kasyore-collector:
+    build:
+      context: .
+      dockerfile: src/collector/Dockerfile
+    working_dir: /usr/kasyore-collector
+    tty: true
+    volumes:
+      - ./:/usr/kasyore-collector
+    entrypoint: python -u src/collector/main.py
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DB_HOST=${POSTGRES_HOST}
+      - DB_PORT=${POSTGRES_PORT}
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
+      - DB_DBNAME=${POSTGRES_DBNAME}
+      - ESA_ACCESS_TOKEN=${ESA_ACCESS_TOKEN}
+      - ESA_TEAM_NAME=${ESA_TEAM_NAME}
+
   tunnel:
     restart: always
     image: cloudflare/cloudflared
@@ -78,3 +116,4 @@ services:
 volumes:
   es1vol:
     driver: local
+  db-store:
