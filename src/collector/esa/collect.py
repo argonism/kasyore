@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
+import psycopg2
 from piyo import Client
 from tqdm import tqdm
 
@@ -23,18 +24,30 @@ def setup_logger(name, level: int = logging.INFO):
     return logger
 
 
-logger = setup_logger(__file__)
+logger = setup_logger(__file__, logging.DEBUG)
+
+
+def load_dotenv():
+    env_path = Path(__file__, "../../../.env")
+    if env_path.exists():
+        with env_path.open() as f:
+            for line in f:
+                key, value = line.strip().split("=")
+                os.environ[key] = value
 
 
 class EsaCrawlerWriter(ABC):
     @abstractmethod
-    def write(self, post: List[Dict]): ...
+    def write(self, post: List[Dict]):
+        ...
 
     @abstractmethod
-    def __enter__(self): ...
+    def __enter__(self):
+        ...
 
     @abstractmethod
-    def __exit__(self, ex_type, ex_value, trace): ...
+    def __exit__(self, ex_type, ex_value, trace):
+        ...
 
 
 class EsaCrawlerJsonLWriter(EsaCrawlerWriter):
@@ -55,6 +68,87 @@ class EsaCrawlerJsonLWriter(EsaCrawlerWriter):
         for post in posts:
             line = json.dumps(post, ensure_ascii=False) + "\n"
             self.f.write(line)
+
+
+class EsaCrawlerPostgreWriter(EsaCrawlerWriter):
+    def __init__(self, connection_info: Dict):
+        self.connection_info = connection_info
+
+    def __enter__(self):
+        self.connection = psycopg2.connect(**self.connection_info)
+        self.cursor = self.connection.cursor()
+        return self
+
+    def __exit__(self, ex_type, ex_value, trace):
+        self.cursor.close()
+        self.connection.close()
+
+    def _create_table(self):
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS esa_docs (
+                number VARCHAR(10),
+                full_name TEXT,
+                wip BOOLEAN,
+                body_md TEXT,
+                body_html TEXT,
+                created_at timestamp with time zone,
+                updated_at timestamp with time zone,
+                url TEXT,
+                created_by VARCHAR(20),
+                PRIMARY KEY (number)
+            )
+            """
+        )
+        self.connection.commit()
+
+    def write(self, posts: List[Dict]):
+        if not hasattr(self, "cursor"):
+            raise Exception("Use this object within 'with' statement")
+
+        for post in posts:
+            number = post["number"]
+            full_name = post["full_name"]
+            wip = post["wip"]
+            body_md = post["body_md"]
+            body_html = post["body_html"]
+            created_at = post["created_at"]
+            updated_at = post["updated_at"]
+            url = post["url"]
+            created_by = post["created_by"]["screen_name"]
+
+            self.cursor.execute(
+                """
+                    INSERT INTO esa_docs (
+                        number, full_name, wip, body_md, body_html, created_at
+                        , updated_at, url, created_by)
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s
+                        , %s, %s, %s)
+                    ON CONFLICT (number) DO UPDATE SET
+                        full_name = EXCLUDED.full_name,
+                        wip = EXCLUDED.wip,
+                        body_md = EXCLUDED.body_md,
+                        body_html = EXCLUDED.body_html,
+                        created_at = EXCLUDED.created_at,
+                        updated_at = EXCLUDED.updated_at,
+                        url = EXCLUDED.url,
+                        created_by = EXCLUDED.created_by
+                """,
+                (
+                    number,
+                    full_name,
+                    wip,
+                    body_md,
+                    body_html,
+                    created_at,
+                    updated_at,
+                    url,
+                    created_by,
+                ),
+            )
+
+        self.connection.commit()
 
 
 class EsaCrawler(object):
@@ -84,7 +178,7 @@ class EsaCrawler(object):
     def _update_last_crawled_data(self, file_path: str = ".last_crawled.json"):
         data = {
             "exeuted_at": self.exeuted_at.strftime("%Y-%m-%d"),
-            "last_updated_at": self.last_post_updated_at,
+            "last_updated_at": getattr(self, "last_post_updated_at", None),
             "exit_status": self.crawle_status,
         }
         file_path = Path(file_path)
@@ -114,6 +208,8 @@ class EsaCrawler(object):
         }
         next_page = 1
         total_posts = self.get_total_post()
+        current_posts = 0
+        logger.info(f"Total posts: {total_posts}")
         try:
             self.crawle_status = "crawling"
             with writer_obj as writer, tqdm(total=total_posts) as pbar:
@@ -130,12 +226,16 @@ class EsaCrawler(object):
                     writer.write(posts)
 
                     next_page = result["next_page"]
-                    pbar.update(len(posts))
+                    current_posts += len(posts)
+                    logger.debug(
+                        f"{current_posts / total_posts} % posts are collected."
+                    )
 
             self.crawle_status = "success"
 
         except Exception as e:
             self.crawle_status = f"error: ({e})"
+            raise e
             logger.error(e)
         finally:
             self._update_last_crawled_data()
@@ -144,5 +244,14 @@ class EsaCrawler(object):
 if __name__ == "__main__":
     output_path = "esa_posts.jsonl"
     crawler = EsaCrawler()
-    writer = EsaCrawlerJsonLWriter(output_path)
+    # writer = EsaCrawlerJsonLWriter(output_path)
+    writer = EsaCrawlerPostgreWriter(
+        {
+            "host": os.environ["DB_HOST"],
+            "port": os.environ["DB_PORT"],
+            "dbname": os.environ["DB_DBNAME"],
+            "user": os.environ["DB_USER"],
+            "password": os.environ["DB_PASSWORD"],
+        }
+    )
     res = crawler.crawl_posts(writer)
