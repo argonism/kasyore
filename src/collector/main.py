@@ -15,7 +15,8 @@ def collect_esa(args: Namespace):
             "password": os.environ["DB_PASSWORD"],
         }
     )
-    # res = crawler.crawl_posts(writer)
+    res = crawler.crawl_posts(writer)
+    print(res)
 
 
 def collect(args: Namespace):
@@ -25,8 +26,7 @@ def collect(args: Namespace):
 if __name__ == "__main__":
 
     def parse_args():
-        parser = ArgumentParser(description='birch')
-        parser.add_argument('--qa_model_path', default=None)
+        parser = ArgumentParser(description='kasyore collector')
 
         args, other = parser.parse_known_args()
 

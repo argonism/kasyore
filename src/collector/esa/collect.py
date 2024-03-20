@@ -38,16 +38,13 @@ def load_dotenv():
 
 class EsaCrawlerWriter(ABC):
     @abstractmethod
-    def write(self, post: List[Dict]):
-        ...
+    def write(self, post: List[Dict]): ...
 
     @abstractmethod
-    def __enter__(self):
-        ...
+    def __enter__(self): ...
 
     @abstractmethod
-    def __exit__(self, ex_type, ex_value, trace):
-        ...
+    def __exit__(self, ex_type, ex_value, trace): ...
 
 
 class EsaCrawlerJsonLWriter(EsaCrawlerWriter):
@@ -182,6 +179,10 @@ class EsaCrawler(object):
             "exit_status": self.crawle_status,
         }
         file_path = Path(file_path)
+        if not file_path.exists():
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+
         file_path.write_text(json.dumps(data, ensure_ascii=False))
 
     def get_total_post(self):
