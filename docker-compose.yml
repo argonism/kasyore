@@ -25,6 +25,7 @@ services:
     environment:
       - ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST}
       - ELASTICSEARCH_PORT=${ELASTICSEARCH_PORT}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 
   elasticsearch:
     build:
