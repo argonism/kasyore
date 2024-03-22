@@ -75,7 +75,7 @@
                 }
             },
             "docid": {
-                "type": "integer"
+                "type": "keyword"
             },
             "title": {
                 "type": "text",
@@ -84,6 +84,9 @@
             "body": {
                 "type": "text",
                 "analyzer": "sudachi_analyzer"
+            },
+            "url": {
+                "type": "keyword"
             },
             "created_at": {
                 "type": "date"
