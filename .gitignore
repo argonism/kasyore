@@ -162,3 +162,5 @@ cython_debug/
 corpus/*.jsonl
 corpus/*.py
 .vscode
+src/collector/*.jsonl
+src/collector/*.json

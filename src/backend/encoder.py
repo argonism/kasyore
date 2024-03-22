@@ -146,7 +146,9 @@ class DenseRetriever(Retriever):
 
         for docs_chunk in corpus_loader.load(batch_size=batch_size):
             embeddings, docids = self.encode_docs(doc_preprocesser(docs_chunk))
-            self.vector_indexer.index(yield_doc_vector(embeddings, docids, docs_chunk))
+            self.vector_indexer.index(
+                yield_doc_vector(embeddings, docids, docs_chunk)
+            )
 
     def retrieve(self, queries: Iterable[str], top_k: int) -> List[Tuple]:
         embeddings = self.encode_queries(queries)

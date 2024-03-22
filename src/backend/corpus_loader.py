@@ -20,12 +20,14 @@ class Doc(BaseModel):
 
 
 class Preprocessor(object):
-    def __call__(self, doc: BaseModel) -> BaseModel:
+    def __call__(self, doc: Dict) -> Dict:
         raise NotImplementedError
 
 
 class CorpusLoader(abc.ABC):
-    def load(self, batch_size: int = 10_000) -> Iterator[List[BaseModel]]:
+    def load(
+        self, batch_size: int = 10_000, preprocessores: List[Preprocessor] = []
+    ) -> Iterator[List[Dict]]:
         raise NotImplementedError
 
 
@@ -34,19 +36,16 @@ class JsonlCorpusLoader(CorpusLoader):
         self,
         path: str,
         preprocessores: List[Preprocessor] = [],
-        data_type: BaseModel = Doc,
         verbose: bool = True,
     ) -> None:
         self.path = path
-        self.data_type = data_type
         self.verbose = verbose
         self.preprocessores = preprocessores
 
     def iter_lines(self, path: str) -> Iterator[BaseModel]:
         with open(path) as f:
             for i, line in enumerate(f):
-                doc_dict = json.loads(line)
-                doc = self.data_type(**doc_dict)
+                doc = json.loads(line)
                 for preprocessor in self.preprocessores:
                     doc = preprocessor(doc)
 
@@ -86,11 +85,14 @@ class PostgresCorpusLoader(CorpusLoader):
         port: int = 5432,
         user: str = "postgres",
         dbname: str = "kasyore",
+        preprocessores: List[Preprocessor] = [],
     ) -> None:
+        super().__init__()
         self.table_map = table_map
         self.connection = psycopg2.connect(
             user=user, host=host, password=password, port=port
         )
+        self.preprocessores = preprocessores
 
     def _transform_row(self, row: Dict[str, str]) -> Dict[str, str]:
         mapper = self.table_map.mapper
@@ -99,6 +101,11 @@ class PostgresCorpusLoader(CorpusLoader):
                 row[v] = row.pop(k)
         return row
 
+    def map_preprocessores(self, doc: Dict) -> Dict:
+        for preprocessor in self.preprocessores:
+            doc = preprocessor(doc)
+        return doc
+
     def fetch(self):
         with self.connection.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -106,14 +113,14 @@ class PostgresCorpusLoader(CorpusLoader):
             )
             for row in cur:
                 row = dict(row)
-                transformed = self._transform_row(row)
-                record = dict(zip(self.table_map.mapper.keys(), row))
-                yield row
+                record = self._transform_row(row)
+                record = self.map_preprocessores(record)
+                yield record
 
     def __del__(self):
         self.connection.close()
 
-    def load(self, batch_size: int = 10_000) -> Iterator[List[BaseModel]]:
+    def load(self, batch_size: int = 10_000) -> Iterator[List[Dict]]:
         iterator = chunked(self.fetch(), batch_size)
         for chunk in iterator:
             yield chunk

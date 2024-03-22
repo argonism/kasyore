@@ -23,15 +23,21 @@ class ElasticsearchConfig:
     port: int
     schema: str = "http"
     index_name: str = "fotla_index"
-    index_scheme_path: str = project_dir / "vector_indexer/elasticsearch/mappngs.json"
+    index_scheme_path: str = project_dir / "mappings/kasyore.json"
 
 
 class ElasticsearchIndexManager(object):
-    def __init__(self, es: elasticsearch.Elasticsearch, config: ElasticsearchConfig):
+    def __init__(
+        self,
+        es: elasticsearch.Elasticsearch,
+        fields: List[str],
+        config: ElasticsearchConfig,
+    ):
         self.config = config
         self.es = elasticsearch.Elasticsearch(
             f"{self.config.schema}://{self.config.host}:{self.config.port}",
         )
+        self.fields = fields
         self.config = config
 
     def gen_index_name(
@@ -72,27 +78,15 @@ class ElasticsearchIndexManager(object):
         )
 
     def create_index_body(
-        self, record: BaseModel, fields: Optional[List[str]]
+        self, record: Dict, fields: Optional[List[str]] = None
     ) -> Dict:
-        vec = None
-        if isinstance(record, VecRecord):
-            record, vec = record.doc, record.vec
-
-        if fields is None:
-            body = {
-                "doc_id": record.doc_id,
-                "title": record.title,
-                "text": record.text,
-            }
-        else:
-            body = {}
-            record_dict = record.model_dump()
-            for field in fields:
-                body[field] = record_dict.get(field, None)
-
-        if vec is not None:
-            unit_vec = vec / np.linalg.norm(vec)
-            body["vec"] = unit_vec
+        fields = self.fields if fields is None else fields
+        body = {}
+        for field in fields:
+            value = record.get(field, None)
+            if isinstance(value, np.ndarray):
+                value = value / np.linalg.norm(value)
+            body[field] = value
 
         return body
 
@@ -107,7 +101,7 @@ class ElasticsearchIndexManager(object):
 
         return new_index_name
 
-    def get_latest_index_name(self, index_name: str) -> str:
+    def get_latest_index_name(self, alias_name: str) -> Optional[str]:
         """Returns the latest index name.
 
         Args:
@@ -116,13 +110,21 @@ class ElasticsearchIndexManager(object):
         Returns:
             The latest index name.
         """
-        indices = self.es.indices.get_alias(index=index_name)
-        return list(indices.keys())[0]
+
+        if not self.es.indices.exists_alias(name=alias_name):
+            return None
+
+        indices = self.es.indices.get_alias(name=alias_name)
+        latest_index_name = list(indices.keys())[0]
+        return latest_index_name
 
     def switch_alias(self, new_index_name: str, alias_name: str) -> None:
-        old_index_name = self.get_latest_index_name(alias_name)
-        self.es.indices.delete_alias(index=old_index_name, name=alias_name)
-        self.es.indices.put_alias(index=new_index_name, name=alias_name)
+        if self.es.indices.exists_alias(name=alias_name):
+            old_index_name = self.get_latest_index_name(alias_name)
+            self.es.indices.delete_alias(index=old_index_name, name=alias_name)
+            self.es.indices.put_alias(index=new_index_name, name=alias_name)
+        else:
+            self.es.indices.put_alias(index=new_index_name, name=alias_name)
 
     def async_index(self, records: Iterable[BaseModel]) -> None:
         try:
@@ -152,7 +154,7 @@ class ElasticsearchIndexManager(object):
         async def main():
             write_count = 0
             async for ok, result in async_streaming_bulk(
-                es, async_create_index_body(records)
+                self.es, async_create_index_body(records)
             ):
                 action, result = result.popitem()
                 if not ok:
@@ -161,9 +163,6 @@ class ElasticsearchIndexManager(object):
                     write_count += 1
             return write_count
 
-        es = elasticsearch.AsyncElasticsearch(
-            f"{self.config.schema}://{self.config.host}:{self.config.port}",
-        )
         loop = asyncio.get_event_loop()
         write_count = loop.run_until_complete(main())
         return write_count
@@ -171,7 +170,7 @@ class ElasticsearchIndexManager(object):
     def index(
         self,
         index_name: str,
-        records: Iterable[BaseModel],
+        records: Iterable[Dict],
         config: Optional[ElasticsearchConfig] = None,
         fields: Optional[List[str]] = None,
         refresh: bool = True,
@@ -203,21 +202,40 @@ class ElasticsearchIndexer(DenseIndexer):
     def __init__(
         self,
         config: ElasticsearchConfig,
-        fields: Optional[List[str]] = None,
         recreate_index: bool = False,
     ) -> None:
         self.config = config
-        self.fields = fields
+        self.mapping = self.__read_mapping(self.config.index_scheme_path)
+        self.fields = list(self.mapping["properties"].keys())
+        self.term_field = self.__term_fields(self.mapping["properties"])
         logger.info(f"setting fields: {self.fields}")
+
         self.es = elasticsearch.Elasticsearch(
             f"{self.config.schema}://{self.config.host}:{self.config.port}",
         )
         self.index_name = self.config.index_name
         logger.info(f"setting index: {self.index_name}")
 
-        self.index_manager = ElasticsearchIndexManager(self.es, self.config)
+        self.index_manager = ElasticsearchIndexManager(
+            self.es, self.fields, self.config
+        )
 
-    def index(self, records: Iterable[BaseModel], refresh: bool = True) -> int:
+    def __term_fields(self, properties: Dict) -> List[str]:
+        fields = []
+        for field, field_info in properties.items():
+            if field_info["type"] == "text" or field_info["type"] == "keyword":
+                fields.append(field)
+
+        return fields
+
+    def __read_mapping(self, mapping_path: str) -> Dict:
+        if getattr(self.config, "index_scheme_path", None) is None:
+            raise ValueError("index_scheme_path must be given.")
+
+        with open(self.config.index_scheme_path) as f:
+            return json.load(f)["mappings"]
+
+    def index(self, records: Iterable[Dict], refresh: bool = True) -> int:
         """Indexes the given vectors.
 
         Args:
@@ -237,7 +255,7 @@ class ElasticsearchIndexer(DenseIndexer):
     def query(
         self,
         queries: List[str],
-        term_fields: List[str] = [],
+        term_fields: Optional[List[str]] = None,
         vectors: List[np.ndarray] = [],
         vec_field: str = "vec",
         top_k: int = 10,
@@ -257,6 +275,9 @@ class ElasticsearchIndexer(DenseIndexer):
         """
         logger.debug(f"Querying {len(queries)} queries.")
 
+        if term_fields is None:
+            term_fields = self.term_field
+
         if len(vectors) <= 0 and len(term_fields) <= 0:
             raise ValueError("Either vectors or term_field must be given.")
 
@@ -274,11 +295,11 @@ class ElasticsearchIndexer(DenseIndexer):
                 if len(term_fields) <= 0
                 else {
                     "multi_match": {
+                        "type": "most_fields",
                         "query": query,
                         "fields": term_fields,
                         "operator": operator,
-                        "type": "cross_fields",
-                        "boost": 0.5,
+                        "boost": 1,
                     }
                 }
             )
@@ -292,9 +313,10 @@ class ElasticsearchIndexer(DenseIndexer):
                     "query_vector": unit_vec,
                     "k": top_k,
                     "num_candidates": top_k * 2,
-                    "filter": term_query,
-                    "boost": 0.5,
+                    "boost": 1,
                 }
+                if len(term_fields) > 0:
+                    knn_param["filter"] = term_query
 
             logger.debug(f"term_query: {term_query}")
             res = self.es.search(
@@ -308,10 +330,9 @@ class ElasticsearchIndexer(DenseIndexer):
                 "total": res["hits"]["total"]["value"],
                 "hits": res["hits"]["hits"],
             }
-            logger.debug(f"query {query} retrieved {len(result['hits'])} results.")
+            logger.debug(f"query '{query}' retrieved {len(result['hits'])} results.")
             results.append((query, result))
 
-            logger.debug(f"Retrieved {len(result)} results.")
         return results
 
 
@@ -362,14 +383,14 @@ class ElasticsearchBM25(Retriever):
     def retrieve(
         self,
         queries: List[str],
-        top_k: int,
-        search_fields: Optional[List[str]] = None,
         from_: int = 0,
         size: int = 10,
-        hybrid: bool = False,
-    ) -> List[Tuple[str, Dict]]:
+        topk: int = 100,
+        search_fields: Optional[List[str]] = None,
+        **kwargs: Dict,
+    ) -> List[Tuple]:
         fields = self.fields if search_fields is None else search_fields
         result = self.es_indexer.query(
-            queries, term_fields=fields, top_k=top_k, from_=from_, size=size
+            queries, term_fields=fields, top_k=topk, from_=from_, size=size
         )
         return result
