@@ -16,6 +16,9 @@ torch = { version = "^2.1.1", extras = ["encoder"] }
 uvicorn = "^0.24.0.post1"
 aiohttp = "^3.9.1"
 alembic = "^1.13.1"
+psycopg2 = "^2.9.9"
+markdown = "^3.6"
+beautifulsoup4 = "^4.12.3"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.9.1"
