@@ -14,7 +14,7 @@
 
     let search_opt_params = getSearchOptParams($page.url.searchParams);
     let topk = search_opt_params.topk;
-    let term_filter = search_opt_params.hybrid;
+    const term_filter = search_opt_params.hybrid;
     let search_fields = search_opt_params.search_fields;
 
     function buildSearchAPIParams(): string {
@@ -35,24 +35,7 @@
         <SearchBox {topk} {term_filter} {query} {search_fields} />
         {#if search_result.length > 0}
             {#each search_result as item}
-                <a
-                    href={`https://kdb.tsukuba.ac.jp/syllabi/2023/${item._source.subject_number}/jpn/0`}
-                    target="_blank"
-                    class="w-full mx-auto"
-                >
-                    <ResultCard {item} />
-                </a>
-                <!-- {#if item._source.url !== ""}
-                    <a
-                        href={item._source.url}
-                        target="_blank"
-                        class="w-full mx-auto"
-                    >
-                        <ResultCard {item} />
-                    </a>
-                {:else}
-                    <ResultCard {item} />
-                {/if} -->
+                <ResultCard {item} />
             {/each}
             <Pagenation
                 params={pagenation_params}

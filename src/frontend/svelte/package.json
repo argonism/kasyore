@@ -29,6 +29,7 @@
   },
   "type": "module",
   "dependencies": {
-    "@fortawesome/free-brands-svg-icons": "^6.4.2"
+    "@fortawesome/free-brands-svg-icons": "^6.4.2",
+    "@tailwindcss/line-clamp": "^0.4.4"
   }
 }
