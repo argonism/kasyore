@@ -10,7 +10,9 @@ from src.backend.corpus_loader import (
     AdhocCorpusLoader,
     Doc,
     JsonlCorpusLoader,
+    PostgresCorpusLoader,
     Preprocessor,
+    TableMapper,
 )
 from src.backend.encoder import HFSymetricDenseEncoder
 from src.backend.indexer.elasticsearch import (
@@ -19,6 +21,7 @@ from src.backend.indexer.elasticsearch import (
     ElasticsearchIndexer,
 )
 from src.backend.retriever import DenseRetriever
+from src.collector.esa.preprocessor import MdRemovalPreprocessor
 
 
 class KasyoreDoc(BaseModel):
@@ -33,12 +36,11 @@ def load_indexer(recreate_index: bool = False):
     es_config = ElasticsearchConfig(
         es_host,
         es_port,
-        index_name="kasyore",
+        index_name="kasyore-dense",
         index_scheme_path="mappings/kasyore.json",
     )
     indexer = ElasticsearchIndexer(
         es_config,
-        fields=list(KasyoreDoc.model_fields.keys()),
         recreate_index=recreate_index,
     )
     return indexer
@@ -46,43 +48,39 @@ def load_indexer(recreate_index: bool = False):
 
 def load_retirever(indexer):
     def sillabi_to_text(docs: List[KasyoreDoc]) -> List[str]:
-        return [" ".join([doc.title, doc.body]) for doc in docs]
+        return [" ".join([doc["title"], doc["body"]]) for doc in docs]
 
-    # encoder = HFSymetricDenseEncoder("facebook/mcontriever-msmarco")
-    # retriever = DenseRetriever(encoder, indexer, model_to_texts=sillabi_to_text)
-    retriever = ElasticsearchBM25(indexer)
+    encoder = HFSymetricDenseEncoder("facebook/mcontriever-msmarco")
+    retriever = DenseRetriever(encoder, indexer, model_to_texts=sillabi_to_text)
+    # retriever = ElasticsearchBM25(indexer)
 
     return retriever
 
 
-def index(retriever):
-    corpus_loader = JsonlCorpusLoader(
-        "corpus/fotla.esa_posts.10.jsonl",
-        data_type=KasyoreDoc,
+def main(args):
+    mapper = TableMapper(
+        table_name="esa_docs",
+        mapper={
+            "full_name": "title",
+            "body_md": "body",
+        },
+    )
+    preprocessores = [
+        MdRemovalPreprocessor(fields=["body"]),
+    ]
+    corpus_loader = PostgresCorpusLoader(
+        table_map=mapper,
+        host="localhost",
+        password=os.environ["POSTGRES_PASSWORD"],
+        preprocessores=preprocessores,
     )
 
-    retriever.index(corpus_loader)
-
-
-def playground(indexer, retriever):
-    manager = indexer.index_manager
-    # a = manager.es.indices.get_alias(name="kasyore")
-    # a = manager.es.indices.delete_alias(
-    #     index="kasyore_1707417475-9818451", name="kasyore"
-    # )
-    # print(a)
-    index(retriever)
-
-
-def main(args):
     indexer = load_indexer(args.recreate_index)
     retriever = load_retirever(indexer)
 
-    playground(indexer, retriever)
-    return
-
     if args.index:
-        index(retriever)
+        print("indexing ...")
+        retriever.index(corpus_loader)
 
     if not args.retrieve == "":
         search_fields = [
@@ -101,7 +99,7 @@ def parse_args():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--index", action="store_true")
+    parser.add_argument("--index", action="store_true", default=False)
     parser.add_argument("--retrieve", default="")
     parser.add_argument("--recreate_index", action="store_true")
     return parser.parse_args()
